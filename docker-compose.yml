@@ -1,0 +1,47 @@
+services:
+  app:
+    build: .
+    container_name: wecom-deepseek-assistant
+    env_file: .env
+    ports:
+      - "${APP_PORT:-8008}:8008"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      searxng:
+        condition: service_started
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: wecom-assistant-postgres
+    environment:
+      POSTGRES_DB: wecom_assistant
+      POSTGRES_USER: assistant
+      POSTGRES_PASSWORD: assistant
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U assistant -d wecom_assistant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: wecom-assistant-redis
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
+  searxng:
+    image: searxng/searxng:latest
+    container_name: wecom-assistant-searxng
+    environment:
+      - SEARXNG_BASE_URL=http://searxng:8080/
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

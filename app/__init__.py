@@ -1,0 +1,1 @@
+"""WeCom DeepSeek assistant application."""
