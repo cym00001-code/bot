@@ -20,7 +20,7 @@ services:
     environment:
       POSTGRES_DB: wecom_assistant
       POSTGRES_USER: assistant
-      POSTGRES_PASSWORD: assistant
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-assistant}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
