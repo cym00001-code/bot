@@ -7,7 +7,6 @@ import struct
 import xml.etree.ElementTree as ET
 
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.padding import PKCS7
 
 from app.gateways.wecom_crypto import WeComCrypto, extract_encrypt_from_xml
 
@@ -20,8 +19,8 @@ def _encrypt_message(plain_xml: str, corp_id: str, encoding_aes_key: str) -> str
         + plain_xml.encode("utf-8")
         + corp_id.encode("utf-8")
     )
-    padder = PKCS7(128).padder()
-    padded = padder.update(payload) + padder.finalize()
+    pad_len = 32 - (len(payload) % 32)
+    padded = payload + bytes([pad_len]) * pad_len
     encryptor = Cipher(algorithms.AES(key), modes.CBC(key[:16])).encryptor()
     return base64.b64encode(encryptor.update(padded) + encryptor.finalize()).decode("utf-8")
 
