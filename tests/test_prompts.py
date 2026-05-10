@@ -12,4 +12,5 @@ def test_persona_prompt_prefers_friend_tone_over_service_tone() -> None:
     assert "不要客服腔" in prompt
     assert "用户随手丢来的东西都要接住" in prompt
     assert "不要频繁说" in prompt
+    assert "回答前优先使用长期记忆" in prompt
     assert "用户喜欢简洁回答" in prompt

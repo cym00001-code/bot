@@ -75,14 +75,20 @@ class MemoryService:
                 select(Memory)
                 .where(Memory.user_id == user_id, Memory.deleted_at.is_(None))
                 .order_by(Memory.updated_at.desc())
-                .limit(max(limit * 4, 16))
+                .limit(max(limit * 8, 40))
             )
         ).all()
 
         scored: list[tuple[float, Memory, str]] = []
-        for row in rows:
+        for index, row in enumerate(rows):
             content = self.encryptor.decrypt_text(row.content_encrypted) or ""
-            score = token_overlap_score(query, content) + row.confidence * 0.05
+            recency = max(0.0, 0.12 - index * 0.004)
+            score = (
+                token_overlap_score(query, content) * 2.2
+                + self._type_query_boost(query, row.memory_type)
+                + row.confidence * 0.12
+                + recency
+            )
             scored.append((score, row, content))
 
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -95,6 +101,19 @@ class MemoryService:
             )
             for _, row, content in scored[:limit]
         ]
+
+    def _type_query_boost(self, query: str, memory_type: str) -> float:
+        if any(word in query for word in ("喜欢", "偏好", "习惯", "口味", "风格")):
+            return 0.35 if memory_type in {"preference", "instruction"} else 0.0
+        if any(word in query for word in ("我是谁", "我的名字", "叫我", "职业", "生日", "城市")):
+            return 0.35 if memory_type == "profile" else 0.0
+        if any(word in query for word in ("朋友", "同学", "家人", "对象", "关系")):
+            return 0.35 if memory_type == "relationship" else 0.0
+        if any(word in query for word in ("项目", "计划", "目标", "任务", "最近在")):
+            return 0.35 if memory_type == "project" else 0.0
+        if any(word in query for word in ("记得", "记住", "记忆", "你知道我什么")):
+            return 0.18
+        return 0.0
 
     async def forget_matching(self, user_id: UUID, keyword: str) -> int:
         rows = (

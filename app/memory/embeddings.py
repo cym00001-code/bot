@@ -29,7 +29,12 @@ class HashingEmbedder:
 
     def _tokenize(self, text: str) -> list[str]:
         latin = re.findall(r"[a-zA-Z0-9_]+", text.lower())
-        chinese = [char for char in text if "\u4e00" <= char <= "\u9fff"]
+        chinese_runs = re.findall(r"[\u4e00-\u9fff]+", text)
+        chinese: list[str] = []
+        for run in chinese_runs:
+            chinese.extend(run)
+            chinese.extend(run[index : index + 2] for index in range(max(len(run) - 1, 0)))
+            chinese.extend(run[index : index + 3] for index in range(max(len(run) - 2, 0)))
         return latin + chinese
 
 

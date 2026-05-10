@@ -18,8 +18,11 @@ class ToolRegistry:
     def register(self, spec: ToolSpec) -> None:
         self._tools[spec.name] = spec
 
-    def list_for_model(self) -> list[dict[str, Any]]:
-        return [tool.as_deepseek_tool() for tool in self._tools.values()]
+    def list_for_model(self, names: set[str] | None = None) -> list[dict[str, Any]]:
+        tools = self._tools.values()
+        if names is not None:
+            tools = [tool for tool in tools if tool.name in names]
+        return [tool.as_deepseek_tool() for tool in tools]
 
     def names(self) -> list[str]:
         return sorted(self._tools)

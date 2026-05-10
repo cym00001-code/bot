@@ -8,6 +8,7 @@ from app.core.config import Settings
 from app.core.security import Encryptor
 from app.memory.service import MemoryService
 from app.schemas import MemoryCandidate, ToolExecutionResult
+from app.services.budget_service import BudgetService
 from app.services.expense_service import ExpenseService
 from app.services.reminder_service import ReminderService
 from app.services.search_service import SearchService
@@ -22,6 +23,7 @@ def make_tool_registry(
 ) -> ToolRegistry:
     registry = ToolRegistry(session)
     expense_service = ExpenseService(session, encryptor)
+    budget_service = BudgetService(session, encryptor, expense_service)
     memory_service = MemoryService(session, encryptor)
     search_service = SearchService(settings)
     reminder_service = ReminderService(session, encryptor, settings.timezone)
@@ -47,6 +49,39 @@ def make_tool_registry(
             requires_confirmation=False,
             result_summary=summary,
             data=data,
+        )
+
+    async def expense_delete(user_id: UUID, args: dict) -> ToolExecutionResult:
+        _, summary = await expense_service.delete_from_text(user_id, str(args.get("text", "")))
+        return ToolExecutionResult(
+            tool_name="expense_delete",
+            arguments=args,
+            risk_level="medium",
+            requires_confirmation=False,
+            result_summary=summary,
+            data={"ok": True},
+        )
+
+    async def budget_set(user_id: UUID, args: dict) -> ToolExecutionResult:
+        _, summary = await budget_service.set_budget_from_text(user_id, str(args.get("text", "")))
+        return ToolExecutionResult(
+            tool_name="budget_set",
+            arguments=args,
+            risk_level="low",
+            requires_confirmation=False,
+            result_summary=summary,
+            data={"ok": True},
+        )
+
+    async def budget_evaluate(user_id: UUID, args: dict) -> ToolExecutionResult:
+        _, summary = await budget_service.evaluate_from_text(user_id, str(args.get("text", "")))
+        return ToolExecutionResult(
+            tool_name="budget_evaluate",
+            arguments=args,
+            risk_level="low",
+            requires_confirmation=False,
+            result_summary=summary,
+            data={"ok": True},
         )
 
     async def memory_save(user_id: UUID, args: dict) -> ToolExecutionResult:
@@ -119,6 +154,28 @@ def make_tool_registry(
             data={"ok": True},
         )
 
+    async def reminder_list(user_id: UUID, args: dict) -> ToolExecutionResult:
+        summary = await reminder_service.list_pending(user_id)
+        return ToolExecutionResult(
+            tool_name="reminder_list",
+            arguments=args,
+            risk_level="low",
+            requires_confirmation=False,
+            result_summary=summary,
+            data={"ok": True},
+        )
+
+    async def reminder_complete(user_id: UUID, args: dict) -> ToolExecutionResult:
+        _, summary = await reminder_service.complete_from_text(user_id, str(args.get("text", "")))
+        return ToolExecutionResult(
+            tool_name="reminder_complete",
+            arguments=args,
+            risk_level="low",
+            requires_confirmation=False,
+            result_summary=summary,
+            data={"ok": True},
+        )
+
     text_arg_schema = {
         "type": "object",
         "properties": {"text": {"type": "string"}},
@@ -143,6 +200,36 @@ def make_tool_registry(
             risk_level="low",
             requires_confirmation=False,
             handler=expense_query,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="expense_delete",
+            description="删除一笔账单，例如：删除上一笔，或 删除今天午饭36。",
+            parameters=text_arg_schema,
+            risk_level="medium",
+            requires_confirmation=False,
+            handler=expense_delete,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="budget_set",
+            description="设置本月预算，例如：这个月预算3000，本月餐饮预算800。",
+            parameters=text_arg_schema,
+            risk_level="low",
+            requires_confirmation=False,
+            handler=budget_set,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="budget_evaluate",
+            description="评估一笔计划消费是否适合当前预算，例如：想花200买鞋，帮我评估。",
+            parameters=text_arg_schema,
+            risk_level="low",
+            requires_confirmation=False,
+            handler=budget_evaluate,
         )
     )
     registry.register(
@@ -213,6 +300,26 @@ def make_tool_registry(
             risk_level="low",
             requires_confirmation=False,
             handler=reminder_create,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="reminder_list",
+            description="列出当前待办和提醒。",
+            parameters={"type": "object", "properties": {}},
+            risk_level="low",
+            requires_confirmation=False,
+            handler=reminder_list,
+        )
+    )
+    registry.register(
+        ToolSpec(
+            name="reminder_complete",
+            description="完成一个待办或提醒，例如：完成交水费待办。",
+            parameters=text_arg_schema,
+            risk_level="low",
+            requires_confirmation=False,
+            handler=reminder_complete,
         )
     )
     return registry

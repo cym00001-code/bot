@@ -64,6 +64,24 @@ class ExpenseQueryIntent:
     kind: str = "expense"
 
 
+@dataclass(frozen=True)
+class BudgetIntent:
+    month: date
+    amount: Decimal
+    category: str | None = None
+    note: str = ""
+    currency: str = "CNY"
+
+
+@dataclass(frozen=True)
+class SpendEvaluationIntent:
+    amount: Decimal
+    category: str | None
+    note: str
+    occurred_on: date
+    currency: str = "CNY"
+
+
 class ToolExecutionResult(BaseModel):
     tool_name: str
     arguments: dict[str, Any] = Field(default_factory=dict)

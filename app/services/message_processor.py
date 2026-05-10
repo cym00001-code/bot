@@ -13,7 +13,8 @@ from app.core.config import Settings
 from app.core.security import Encryptor
 from app.db.models import Message, User
 from app.memory.service import MemoryService
-from app.schemas import ChatContext, IncomingMessage
+from app.schemas import ChatContext, IncomingMessage, RetrievedMemory
+from app.services.budget_service import BudgetService
 from app.services.expense_parser import ExpenseParser
 from app.services.expense_service import ExpenseService
 from app.services.reminder_service import ReminderService
@@ -42,16 +43,31 @@ class MessageProcessor:
     async def process(self, incoming: IncomingMessage) -> str:
         user = await self._ensure_owner_user(incoming.sender_id)
         await self._save_message(user.id, "in", incoming.content, incoming)
+        memory_service = MemoryService(self.session, self.encryptor)
+        saved_memories = await memory_service.remember_from_text(user.id, incoming.content)
+
+        memory_shortcut = self._memory_shortcut_reply(incoming.content, saved_memories)
+        if memory_shortcut:
+            await self._save_message(user.id, "out", memory_shortcut)
+            return memory_shortcut
 
         shortcut = await self._try_local_shortcut(user.id, incoming.content)
         if shortcut:
             await self._save_message(user.id, "out", shortcut)
             return shortcut
 
-        memory_service = MemoryService(self.session, self.encryptor)
-        await memory_service.remember_from_text(user.id, incoming.content)
-        memories = await memory_service.retrieve(user.id, incoming.content, limit=8)
-        recent_messages = await self._recent_messages(user.id)
+        if self._is_memory_recall_query(incoming.content):
+            memories = await memory_service.retrieve(
+                user.id, incoming.content, limit=min(self.settings.memory_retrieval_limit, 8)
+            )
+            reply = self._format_memory_recall(memories)
+            await self._save_message(user.id, "out", reply)
+            return reply
+
+        memories = await memory_service.retrieve(
+            user.id, incoming.content, limit=self.settings.memory_retrieval_limit
+        )
+        recent_messages = await self._recent_messages(user.id, limit=self.settings.recent_message_limit)
         if (
             recent_messages
             and recent_messages[-1]["role"] == "user"
@@ -62,7 +78,7 @@ class MessageProcessor:
         context = ChatContext(
             user_id=user.id,
             user_text=incoming.content,
-            memories=[f"{item.memory_type}: {item.content}" for item in memories],
+            memories=self._memory_context_lines(memories),
             recent_messages=recent_messages,
             now=datetime.now(ZoneInfo(self.settings.timezone)),
         )
@@ -74,22 +90,100 @@ class MessageProcessor:
     async def _try_local_shortcut(self, user_id: UUID, text: str) -> str | None:
         today = today_in_timezone(self.settings.timezone)
         expense_service = ExpenseService(self.session, self.encryptor, self.expense_parser)
+        budget_service = BudgetService(self.session, self.encryptor, expense_service, self.expense_parser)
+        reminder_service = ReminderService(self.session, self.encryptor, self.settings.timezone)
 
-        if self.expense_parser.parse_record(text, today=today):
-            _, summary = await expense_service.record_from_text(user_id, text, today=today)
+        if self.expense_parser.looks_like_delete(text):
+            _, summary = await expense_service.delete_from_text(user_id, text, today=today)
             return summary
 
         if self.expense_parser.parse_query(text, today=today):
             _, summary, _ = await expense_service.query_from_text(user_id, text, today=today)
             return summary
 
-        if "提醒" in text and any(word in text for word in ("今天", "明天", "后天")):
-            _, summary = await ReminderService(
-                self.session, self.encryptor, self.settings.timezone
-            ).create_from_text(user_id, text)
+        budget_summary = await budget_service.summary_from_text(user_id, text, today=today)
+        if budget_summary:
+            return budget_summary
+
+        if budget_service.parse_spend_evaluation(text, today=today):
+            _, summary = await budget_service.evaluate_from_text(user_id, text, today=today)
+            return summary
+
+        if budget_service.parse_budget(text, today=today):
+            _, summary = await budget_service.set_budget_from_text(user_id, text, today=today)
+            return summary
+
+        if self._looks_like_reminder_list(text):
+            return await reminder_service.list_pending(user_id)
+
+        if self._looks_like_reminder_done(text):
+            _, summary = await reminder_service.complete_from_text(user_id, text)
+            return summary
+
+        if self._looks_like_reminder_create(text):
+            _, summary = await reminder_service.create_from_text(user_id, text)
+            return summary
+
+        if self.expense_parser.parse_record(text, today=today):
+            _, summary = await expense_service.record_from_text(user_id, text, today=today)
             return summary
 
         return None
+
+    def _memory_shortcut_reply(
+        self, text: str, saved_memories: list[RetrievedMemory]
+    ) -> str | None:
+        if not saved_memories:
+            return None
+        if not any(word in text for word in ("记住", "记一下", "别忘", "以后你要")):
+            return None
+        if len(text) > 160:
+            return None
+        joined = "；".join(memory.content for memory in saved_memories[:3])
+        return f"记下了：{joined}"
+
+    def _memory_context_lines(self, memories: list[RetrievedMemory]) -> list[str]:
+        lines: list[str] = []
+        used = 0
+        for item in memories:
+            content = item.content.strip()
+            if len(content) > self.settings.memory_item_char_limit:
+                content = content[: self.settings.memory_item_char_limit - 1] + "…"
+            line = f"{item.memory_type}: {content}"
+            if used + len(line) > self.settings.memory_context_char_budget:
+                break
+            lines.append(line)
+            used += len(line)
+        return lines
+
+    def _is_memory_recall_query(self, text: str) -> bool:
+        return any(
+            phrase in text
+            for phrase in (
+                "你记得我什么",
+                "你都记得什么",
+                "你知道我什么",
+                "我的记忆",
+                "我喜欢什么",
+                "我有什么偏好",
+                "我的偏好",
+            )
+        )
+
+    def _format_memory_recall(self, memories: list[RetrievedMemory]) -> str:
+        if not memories:
+            return "现在还没记下太多。你可以直接说“记住……”，我会存起来。"
+        lines = [f"- {memory.content}" for memory in memories[:8]]
+        return "我现在记得这些：\n" + "\n".join(lines)
+
+    def _looks_like_reminder_create(self, text: str) -> bool:
+        return "提醒" in text or "待办" in text or "todo" in text.lower()
+
+    def _looks_like_reminder_list(self, text: str) -> bool:
+        return any(phrase in text for phrase in ("我的待办", "待办列表", "有什么待办", "提醒列表"))
+
+    def _looks_like_reminder_done(self, text: str) -> bool:
+        return any(word in text for word in ("完成", "做完了", "搞定了"))
 
     async def _ensure_owner_user(self, sender_id: str) -> User:
         owner_id = self.settings.owner_we_com_user_id.strip()

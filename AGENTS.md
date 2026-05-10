@@ -10,6 +10,7 @@ This repository contains a personal WeCom assistant powered by DeepSeek. Treat i
 - Core flow: `app/services/message_processor.py`.
 - Long-term memory: `app/memory/`.
 - Tools: `app/tools/`, including expenses, memory, search, and reminders.
+- Budget logic: `app/services/budget_service.py`.
 - Deployment: `docker-compose.yml` for the full stack, `docker-compose.lowmem.yml` for small servers.
 
 ## Commands
@@ -27,6 +28,7 @@ This repository contains a personal WeCom assistant powered by DeepSeek. Treat i
 - Before committing, check staged files and scan for likely secrets.
 - Do not implement personal WeChat reverse-engineering or unofficial login flows. This project intentionally uses official WeCom/self-built-app capabilities.
 - High-risk tools, including memory deletion and bulk finance changes, must require explicit confirmation.
+- Expense parsing should stay conservative. Planned spending, budgets, reminders, and bare numbers must not be recorded as expenses.
 
 ## Deployment Notes
 

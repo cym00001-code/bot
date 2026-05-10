@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     weekly_memory_review_day: str = "sun"
     weekly_memory_review_hour: int = 21
     timezone: str = "Asia/Shanghai"
+    memory_retrieval_limit: int = 12
+    memory_context_char_budget: int = 1600
+    memory_item_char_limit: int = 120
+    recent_message_limit: int = 8
 
     @field_validator("deepseek_base_url", "searxng_base_url", "public_base_url")
     @classmethod

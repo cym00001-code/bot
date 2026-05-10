@@ -41,3 +41,21 @@ def test_query_is_not_misread_as_record() -> None:
     parser = ExpenseParser()
 
     assert parser.parse_record("这个月餐饮花了多少", today=date(2026, 5, 9)) is None
+
+
+def test_bare_amount_is_not_misread_as_record() -> None:
+    parser = ExpenseParser()
+
+    assert parser.parse_record("36", today=date(2026, 5, 9)) is None
+
+
+def test_planned_spend_is_not_recorded() -> None:
+    parser = ExpenseParser()
+
+    assert parser.parse_record("想花 200 买鞋，帮我评估", today=date(2026, 5, 9)) is None
+
+
+def test_delete_intent_is_detected() -> None:
+    parser = ExpenseParser()
+
+    assert parser.looks_like_delete("删除上一笔账单")

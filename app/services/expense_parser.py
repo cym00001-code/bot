@@ -30,12 +30,31 @@ EXPENSE_CATEGORIES: dict[str, tuple[str, ...]] = {
 DEFAULT_CATEGORY = "其他"
 AMOUNT_RE = re.compile(r"(?:¥|￥|RMB|rmb)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块|块钱|RMB|rmb)?")
 QUESTION_WORDS = ("多少", "几", "统计", "合计", "总共", "汇总", "账单", "花了", "支出")
+SPEND_WORDS = ("花", "消费", "支出", "付款", "付了", "买", "买了", "用了", "转账", "记账", "记一笔")
+INCOME_WORDS = ("工资", "收入", "奖金", "报销", "退款")
+DELETE_WORDS = ("删除", "删掉", "撤销", "撤回", "记错", "取消这笔")
+NON_RECORD_WORDS = (
+    "预算",
+    "提醒",
+    "待办",
+    "todo",
+    "评估",
+    "能不能",
+    "可不可以",
+    "想花",
+    "准备花",
+    "打算花",
+    "计划花",
+    "如果花",
+)
 
 
 class ExpenseParser:
     def parse_record(self, text: str, today: date | None = None) -> ExpenseRecordIntent | None:
         today = today or date.today()
-        if self._looks_like_query(text):
+        if self._looks_like_query(text) or self.looks_like_delete(text):
+            return None
+        if any(word.lower() in text.lower() for word in NON_RECORD_WORDS):
             return None
 
         matches = list(AMOUNT_RE.finditer(text))
@@ -50,6 +69,8 @@ class ExpenseParser:
         occurred_on = parse_chinese_date(text, today=today) or today
         category = self.detect_category(text)
         note = self._clean_note(text, amount_match.group(0))
+        if not self._has_record_signal(text, category, note):
+            return None
         if not note:
             note = category
 
@@ -59,6 +80,11 @@ class ExpenseParser:
             occurred_on=occurred_on,
             note=note,
             merchant=None,
+        )
+
+    def looks_like_delete(self, text: str) -> bool:
+        return any(word in text for word in DELETE_WORDS) and any(
+            word in text for word in ("账", "消费", "花销", "上一笔", "刚才", "这笔", "午饭", "打车")
         )
 
     def parse_query(self, text: str, today: date | None = None) -> ExpenseQueryIntent | None:
@@ -99,6 +125,13 @@ class ExpenseParser:
         return any(word in text for word in QUESTION_WORDS) and (
             "多少" in text or "统计" in text or "合计" in text or "汇总" in text or "账单" in text
         )
+
+    def _has_record_signal(self, text: str, category: str, note: str) -> bool:
+        if category != DEFAULT_CATEGORY:
+            return True
+        if any(word in text for word in SPEND_WORDS + INCOME_WORDS):
+            return len(note) >= 2
+        return False
 
     def _clean_note(self, text: str, amount_text: str) -> str:
         note = text.replace(amount_text, " ")

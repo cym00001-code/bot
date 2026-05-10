@@ -29,7 +29,8 @@ class DeepSeekBrain:
         messages.append({"role": "user", "content": context.user_text})
 
         model = self._choose_model(context.user_text, has_tools=True)
-        tool_specs = tools.list_for_model()
+        tool_names = self._tool_names_for_text(context.user_text)
+        tool_specs = tools.list_for_model(tool_names) if tool_names else []
 
         try:
             first = await self._chat_completion(messages, model=model, tools=tool_specs)
@@ -89,6 +90,22 @@ class DeepSeekBrain:
         if any(marker in text for marker in complex_markers):
             return self.settings.deepseek_reasoner_model
         return self.settings.deepseek_chat_model
+
+    def _tool_names_for_text(self, text: str) -> set[str]:
+        names: set[str] = set()
+        if any(word in text for word in ("搜索", "搜一下", "查一下", "最新", "新闻", "价格", "实时")):
+            names.add("web_search")
+        if any(word in text for word in ("删除记忆", "忘掉", "别记了", "清除记忆")):
+            names.add("memory_forget")
+        if any(word in text for word in ("删除账", "删掉账", "撤销", "记错")):
+            names.add("expense_delete")
+        if any(word in text for word in ("花销", "账单", "花了多少", "消费统计", "记账")):
+            names.update({"expense_record", "expense_query", "expense_delete"})
+        if "预算" in text or any(word in text for word in ("想花", "准备花", "打算花", "评估")):
+            names.update({"budget_set", "budget_evaluate"})
+        if any(word in text for word in ("提醒", "待办", "todo", "完成")):
+            names.update({"reminder_create", "reminder_list", "reminder_complete"})
+        return names
 
     def _parse_tool_arguments(self, raw: Any) -> dict[str, Any]:
         if isinstance(raw, dict):
