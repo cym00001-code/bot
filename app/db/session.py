@@ -30,3 +30,18 @@ async def init_database() -> None:
         if engine.url.get_backend_name().startswith("postgresql"):
             await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(Base.metadata.create_all)
+        await _apply_lightweight_migrations(conn)
+
+
+async def _apply_lightweight_migrations(conn) -> None:
+    if not engine.url.get_backend_name().startswith("postgresql"):
+        return
+    await conn.execute(
+        text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS external_message_id VARCHAR(128)")
+    )
+    await conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ix_messages_channel_external_message_id_unique "
+            "ON messages (channel, external_message_id) WHERE external_message_id IS NOT NULL"
+        )
+    )

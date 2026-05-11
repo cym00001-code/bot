@@ -32,6 +32,8 @@ async def process_and_send(
         try:
             reply = await MessageProcessor(session, settings, encryptor).process(incoming)
             await session.commit()
+            if not reply:
+                return
         except UnauthorizedUserError:
             await session.rollback()
             logger.warning("ignored unauthorized WeCom user: %s", incoming.sender_id)

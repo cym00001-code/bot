@@ -132,3 +132,67 @@ class MemoryService:
             update(Memory).where(Memory.id.in_(matched_ids)).values(deleted_at=func.now())
         )
         return len(matched_ids)
+
+    async def list_recent(self, user_id: UUID, limit: int = 10) -> list[RetrievedMemory]:
+        rows = (
+            await self.session.scalars(
+                select(Memory)
+                .where(Memory.user_id == user_id, Memory.deleted_at.is_(None))
+                .order_by(Memory.updated_at.desc())
+                .limit(max(1, min(limit, 30)))
+            )
+        ).all()
+        memories: list[RetrievedMemory] = []
+        for row in rows:
+            memories.append(
+                RetrievedMemory(
+                    id=row.id,
+                    memory_type=row.memory_type,
+                    content=self.encryptor.decrypt_text(row.content_encrypted) or "",
+                    confidence=row.confidence,
+                )
+            )
+        return memories
+
+    async def forget_recent_index(self, user_id: UUID, index: int, limit: int = 10) -> int:
+        if index < 1:
+            return 0
+        memories = await self.list_recent(user_id, limit=limit)
+        if index > len(memories):
+            return 0
+        return await self.forget_by_id(user_id, memories[index - 1].id)
+
+    async def forget_by_id(self, user_id: UUID, memory_id: UUID) -> int:
+        result = await self.session.execute(
+            update(Memory)
+            .where(
+                Memory.id == memory_id,
+                Memory.user_id == user_id,
+                Memory.deleted_at.is_(None),
+            )
+            .values(deleted_at=func.now())
+        )
+        return int(result.rowcount or 0)
+
+    async def organize_summary(self, user_id: UUID, limit: int = 20) -> str:
+        memories = await self.list_recent(user_id, limit=limit)
+        if not memories:
+            return "现在还没记下太多。"
+        labels = {
+            "profile": "个人资料",
+            "preference": "偏好",
+            "relationship": "关系",
+            "event": "事件",
+            "finance": "财务",
+            "project": "项目",
+            "instruction": "互动偏好",
+        }
+        grouped: dict[str, list[str]] = {}
+        for memory in memories:
+            grouped.setdefault(memory.memory_type, []).append(memory.content)
+        lines: list[str] = []
+        for memory_type, contents in grouped.items():
+            label = labels.get(memory_type, memory_type)
+            lines.append(f"{label}：")
+            lines.extend(f"- {content}" for content in contents[:5])
+        return "我整理了一下最近的记忆：\n" + "\n".join(lines)

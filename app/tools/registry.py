@@ -6,13 +6,15 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import ToolCall
+from app.services.pending_action_service import PendingActionService
 from app.schemas import ToolExecutionResult
 from app.tools.base import ToolSpec
 
 
 class ToolRegistry:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, timezone: str = "Asia/Shanghai") -> None:
         self.session = session
+        self.pending_actions = PendingActionService(session, timezone)
         self._tools: dict[str, ToolSpec] = {}
 
     def register(self, spec: ToolSpec) -> None:
@@ -46,12 +48,20 @@ class ToolRegistry:
             )
 
         if spec.requires_confirmation and not arguments.get("confirmed"):
+            prompt = self._confirmation_prompt(spec, arguments)
+            await self.pending_actions.create_or_replace(
+                user_id=user_id,
+                tool_name=name,
+                arguments=arguments,
+                risk_level=spec.risk_level,
+                prompt=prompt,
+            )
             result = ToolExecutionResult(
                 tool_name=name,
                 arguments=arguments,
                 risk_level=spec.risk_level,
                 requires_confirmation=True,
-                result_summary="这个操作需要你明确确认后才会执行。",
+                result_summary=prompt,
                 data={"ok": False, "confirmation_required": True},
             )
         else:
@@ -69,3 +79,36 @@ class ToolRegistry:
         )
         await self.session.flush()
         return result
+
+    async def execute_confirmed_pending(self, user_id: UUID) -> ToolExecutionResult | None:
+        action = await self.pending_actions.latest_pending(user_id)
+        if action is None:
+            return None
+        arguments = dict(action.arguments)
+        arguments["confirmed"] = True
+        result = await self.execute(action.tool_name, user_id=user_id, arguments=arguments)
+        await self.pending_actions.mark_done(action)
+        return result
+
+    async def cancel_pending(self, user_id: UUID) -> bool:
+        return await self.pending_actions.cancel_latest(user_id)
+
+    async def latest_confirmation_prompt(self, user_id: UUID) -> str | None:
+        action = await self.pending_actions.latest_pending(user_id)
+        return action.prompt if action else None
+
+    def looks_like_confirm(self, text: str) -> bool:
+        return self.pending_actions.looks_like_confirm(text)
+
+    def looks_like_cancel(self, text: str) -> bool:
+        return self.pending_actions.looks_like_cancel(text)
+
+    def _confirmation_prompt(self, spec: ToolSpec, arguments: dict[str, Any]) -> str:
+        details = ""
+        if "keyword" in arguments:
+            details = f"关键词：{arguments['keyword']}"
+        elif "text" in arguments:
+            details = f"内容：{arguments['text']}"
+        if details:
+            return f"这个操作风险较高，需要你回复“确认”才会执行。\n{details}"
+        return "这个操作风险较高，需要你回复“确认”才会执行。"

@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -39,6 +39,7 @@ class Message(Base):
     direction: Mapped[str] = mapped_column(String(16), index=True)
     channel: Mapped[str] = mapped_column(String(32), default="wecom")
     message_type: Mapped[str] = mapped_column(String(32), default="text")
+    external_message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     content_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
     raw_payload: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -46,6 +47,15 @@ class Message(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="messages")
+
+
+Index(
+    "ix_messages_channel_external_message_id_unique",
+    Message.channel,
+    Message.external_message_id,
+    unique=True,
+    postgresql_where=Message.external_message_id.is_not(None),
+)
 
 
 class Memory(Base):
@@ -130,6 +140,23 @@ class ToolCall(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class PendingAction(Base):
+    __tablename__ = "pending_actions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
+    tool_name: Mapped[str] = mapped_column(String(80), index=True)
+    arguments: Mapped[dict] = mapped_column(JSONB)
+    risk_level: Mapped[str] = mapped_column(String(16), default="high")
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    prompt: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AuditLog(Base):

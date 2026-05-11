@@ -21,7 +21,7 @@ def make_tool_registry(
     settings: Settings,
     encryptor: Encryptor,
 ) -> ToolRegistry:
-    registry = ToolRegistry(session)
+    registry = ToolRegistry(session, settings.timezone)
     expense_service = ExpenseService(session, encryptor)
     budget_service = BudgetService(session, encryptor, expense_service)
     memory_service = MemoryService(session, encryptor)
@@ -111,6 +111,21 @@ def make_tool_registry(
         )
 
     async def memory_forget(user_id: UUID, args: dict) -> ToolExecutionResult:
+        memory_id = str(args.get("memory_id", "")).strip()
+        if memory_id:
+            try:
+                count = await memory_service.forget_by_id(user_id, UUID(memory_id))
+            except ValueError:
+                count = 0
+            return ToolExecutionResult(
+                tool_name="memory_forget",
+                arguments=args,
+                risk_level="high",
+                requires_confirmation=True,
+                result_summary=f"已删除 {count} 条记忆。" if count else "没找到这条记忆。",
+                data={"ok": bool(count), "deleted": count},
+            )
+
         keyword = str(args.get("keyword", "")).strip()
         if not keyword:
             return ToolExecutionResult(
@@ -208,7 +223,7 @@ def make_tool_registry(
             description="删除一笔账单，例如：删除上一笔，或 删除今天午饭36。",
             parameters=text_arg_schema,
             risk_level="medium",
-            requires_confirmation=False,
+            requires_confirmation=True,
             handler=expense_delete,
         )
     )
@@ -269,9 +284,9 @@ def make_tool_registry(
                 "type": "object",
                 "properties": {
                     "keyword": {"type": "string"},
+                    "memory_id": {"type": "string"},
                     "confirmed": {"type": "boolean"},
                 },
-                "required": ["keyword"],
             },
             risk_level="high",
             requires_confirmation=True,
